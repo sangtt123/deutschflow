@@ -41,6 +41,7 @@ interface AppSettings {
   speech_rate?: number;
   random_mode: boolean;
   playback_mode: string;
+  prefer_cloud_tts?: boolean;
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
