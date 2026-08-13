@@ -20,32 +20,84 @@ const DEFAULT_SETTINGS: AppSettings = {
   playback_mode: "German   Vietnamese"
 };
 
+// Hàm gán tên Chủ đề cố định vĩnh viễn dựa trên ID từ vựng (tối đa 20 từ / chủ đề)
+const applyFixedCategories = (items: VocabularyItem[], chunkSize = 20): VocabularyItem[] => {
+  if (!items || items.length === 0) return [];
+
+  // 1. Sắp xếp theo ID tăng dần để thứ tự phân chia LUÔN CỐ ĐỊNH 100%
+  const sortedItems = [...items].sort((a, b) => a.id - b.id);
+
+  // 2. Gom nhóm theo tên Chủ đề gốc (loại bỏ đuôi "- Chủ đề X" nếu có)
+  const grouped: Record<string, VocabularyItem[]> = {};
+
+  sortedItems.forEach((item) => {
+    const baseCategory = (item.category || "General")
+      .replace(/\s*-\s*Chủ đề\s*\d+/gi, "")
+      .trim();
+
+    if (!grouped[baseCategory]) {
+      grouped[baseCategory] = [];
+    }
+    grouped[baseCategory].push({ ...item, category: baseCategory });
+  });
+
+  // 3. Phân chia tối đa 20 từ / chủ đề nhỏ
+  const fixedResult: VocabularyItem[] = [];
+
+  Object.entries(grouped).forEach(([baseCat, catItems]) => {
+    if (catItems.length <= chunkSize) {
+      fixedResult.push(...catItems);
+    } else {
+      for (let i = 0; i < catItems.length; i += chunkSize) {
+        const partIndex = Math.floor(i / chunkSize) + 1;
+        const chunk = catItems.slice(i, i + chunkSize);
+        const fixedCategoryName = `${baseCat} - Chủ đề ${partIndex}`;
+
+        chunk.forEach((item) => {
+          fixedResult.push({ ...item, category: fixedCategoryName });
+        });
+      }
+    }
+  });
+
+  return fixedResult;
+};
+
 export default function App() {
   const [activeTab, setActiveTab] = useState("home");
   
-  // Load initial vocabularies from LocalStorage or Seed list
+  // Load và chuẩn hóa cố định danh sách từ vựng từ LocalStorage hoặc Seed list
   const [vocabularies, setVocabularies] = useState<VocabularyItem[]>(() => {
     const saved = localStorage.getItem("df_vocabularies");
+    let initialList: VocabularyItem[] = [];
+
     if (saved) {
-      try { return JSON.parse(saved); } catch (e) {}
+      try { 
+        initialList = JSON.parse(saved); 
+      } catch (e) {}
     }
-    const rawSeedList = getExpandedVocabularies();
-    return rawSeedList.map((item, index) => ({
-      id: index + 1,
-      word: item.word,
-      article: item.article,
-      meaning: item.meaning,
-      example_de: item.example_de,
-      example_vi: item.example_vi,
-      level: item.level,
-      category: item.category,
-      favorite: index % 5 === 0,
-      review_count: 0,
-      created_at: new Date().toISOString().split("T")[0]
-    }));
+
+    if (initialList.length === 0) {
+      const rawSeedList = getExpandedVocabularies();
+      initialList = rawSeedList.map((item, index) => ({
+        id: index + 1,
+        word: item.word,
+        article: item.article,
+        meaning: item.meaning,
+        example_de: item.example_de,
+        example_vi: item.example_vi,
+        level: item.level,
+        category: item.category,
+        favorite: index % 5 === 0,
+        review_count: 0,
+        created_at: new Date().toISOString().split("T")[0]
+      }));
+    }
+
+    return applyFixedCategories(initialList, 20);
   });
 
-  // Load Settings from LocalStorage
+  // Load Settings từ LocalStorage
   const [settings, setSettings] = useState<AppSettings>(() => {
     const saved = localStorage.getItem("df_settings");
     if (saved) {
@@ -57,7 +109,7 @@ export default function App() {
   const [selectedLevel, setSelectedLevel] = useState("Tất cả");
   const [selectedCategory, setSelectedCategory] = useState("Tất cả");
 
-  // Save changes to LocalStorage
+  // Tự động lưu những thay đổi vào LocalStorage
   useEffect(() => {
     localStorage.setItem("df_vocabularies", JSON.stringify(vocabularies));
   }, [vocabularies]);
@@ -185,7 +237,7 @@ export default function App() {
     recentIdsRef.current.push(selected.id);
     if (recentIdsRef.current.length > 10) recentIdsRef.current.shift();
 
-    // Increment review count locally
+    // Tăng số lần review
     setVocabularies(prev => prev.map(v => v.id === selected.id ? { ...v, review_count: (v.review_count || 0) + 1 } : v));
     return selected;
   };
@@ -327,20 +379,23 @@ export default function App() {
       review_count: 0,
       created_at: new Date().toISOString().split("T")[0]
     };
-    setVocabularies(prev => [newItem, ...prev]);
+    setVocabularies(prev => applyFixedCategories([...prev, newItem], 20));
   };
 
   const handleEditVocab = (id: number, vocab: Partial<VocabularyItem>) => {
-    setVocabularies(prev => prev.map(v => v.id === id ? { ...v, ...vocab } : v));
+    setVocabularies(prev => {
+      const updated = prev.map(v => v.id === id ? { ...v, ...vocab } : v);
+      return applyFixedCategories(updated, 20);
+    });
   };
 
   const handleDeleteVocab = (id: number) => {
-    setVocabularies(prev => prev.filter(v => v.id !== id));
+    setVocabularies(prev => applyFixedCategories(prev.filter(v => v.id !== id), 20));
   };
 
   const handleDeleteBatchVocab = (ids: number[]) => {
     const idSet = new Set(ids);
-    setVocabularies(prev => prev.filter(v => !idSet.has(v.id)));
+    setVocabularies(prev => applyFixedCategories(prev.filter(v => !idSet.has(v.id)), 20));
   };
 
   const handleToggleFavorite = (id: number) => {
@@ -361,7 +416,7 @@ export default function App() {
       }
     });
 
-    setVocabularies(prev => [...prev, ...newItems]);
+    setVocabularies(prev => applyFixedCategories([...prev, ...newItems], 20));
   };
 
   const handleImportVocab = (items: Partial<VocabularyItem>[], mode: "append" | "replace") => {
@@ -384,11 +439,10 @@ export default function App() {
       };
     });
 
-    if (mode === "replace") {
-      setVocabularies(formatted);
-    } else {
-      setVocabularies(prev => [...formatted, ...prev]);
-    }
+    setVocabularies(prev => {
+      const combined = mode === "replace" ? formatted : [...prev, ...formatted];
+      return applyFixedCategories(combined, 20);
+    });
   };
 
   return (
