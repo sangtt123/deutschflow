@@ -1,0 +1,6 @@
+{
+  "name": "DeutschFlow",
+  "description": "A hands-free background German vocabulary learning application with auto-playback and TTS.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
