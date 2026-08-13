@@ -12,6 +12,7 @@ interface VocabularyTabProps {
   onToggleFavorite: (id: number) => void;
   onResetSeed?: () => void;
   onReload?: () => void;
+  onImport?: (items: Partial<VocabularyItem>[], mode: "append" | "replace") => void;
   onSpeak?: (text: string, lang?: string, wordInfo?: VocabularyItem, rate?: number) => void;
 }
 
@@ -24,6 +25,7 @@ export const VocabularyTab: React.FC<VocabularyTabProps> = ({
   onToggleFavorite,
   onResetSeed,
   onReload,
+  onImport,
   onSpeak
 }) => {
   const [search, setSearch] = useState("");
@@ -1045,13 +1047,9 @@ export const VocabularyTab: React.FC<VocabularyTabProps> = ({
       <ExcelImportModal
         isOpen={isExcelModalOpen}
         onClose={() => setIsExcelModalOpen(false)}
+        onImport={onImport} // <-- THÊM DÒNG NÀY
         onImportSuccess={() => {
           showToastMsg("Nhập danh sách từ vựng thành công!");
-          if (onReload) {
-            onReload();
-          } else {
-            window.location.reload();
-          }
         }}
       />
     </div>
