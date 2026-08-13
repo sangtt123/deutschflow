@@ -7,6 +7,7 @@ interface ExcelImportModalProps {
   isOpen: boolean;
   onClose: () => void;
   onImportSuccess: () => void;
+  onImport?: (items: Partial<VocabularyItem>[], mode: "append" | "replace") => void;
 }
 
 export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
@@ -180,38 +181,25 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
   };
 
   // Execute Import
-  const handleExecuteImport = async () => {
+  const handleExecuteImport = () => {
     if (parsedData.length === 0) return;
-
     setLoading(true);
     setErrorMsg(null);
 
     try {
-      const res = await fetch("/api/vocabulary/import", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          items: parsedData,
-          mode: importMode
-        })
-      });
-
-      if (!res.ok) {
-        throw new Error("Lỗi máy chủ khi nhập từ vựng.");
+      if (onImport) {
+        onImport(parsedData, importMode);
       }
-
-      const result = await res.json();
-      setSuccessMsg(`Đã nhập thành công ${result.added_count} từ vựng mới vào thư viện!`);
+      setSuccessMsg(`Đã nhập thành công ${parsedData.length} từ vựng!`);
       setTimeout(() => {
         onImportSuccess();
         onClose();
         setFile(null);
         setParsedData([]);
         setSuccessMsg(null);
-      }, 1500);
+      }, 1000);
     } catch (err) {
-      console.error("Import error:", err);
-      setErrorMsg("Đã xảy ra lỗi khi lưu từ vựng. Vui lòng thử lại!");
+      setErrorMsg("Có lỗi xảy ra khi nhập file!");
     } finally {
       setLoading(false);
     }
