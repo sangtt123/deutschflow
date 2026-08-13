@@ -17,8 +17,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   volume: 80,
   speech_rate: 0.75,
   random_mode: true,
-  playback_mode: "German → Vietnamese",
-  prefer_cloud_tts: true // Đảm bảo ưu tiên giọng chuẩn từ Server
+  playback_mode: "German   Vietnamese"
 };
 
 // Hàm gán tên Chủ đề cố định vĩnh viễn dựa trên ID từ vựng (tối đa 20 từ / chủ đề)
@@ -139,9 +138,7 @@ export default function App() {
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
   const isSequenceRunningRef = useRef<boolean>(false);
 
-  // ==========================================
-  // LOGIC ÂM THANH XỊN ĐÃ MERGE TỪ App1.tsx
-  // ==========================================
+  // Audio Player Engine
   const speakText = (
     text: string,
     lang: string,
@@ -149,11 +146,7 @@ export default function App() {
     customRate?: number
   ): Promise<void> => {
     return new Promise((resolve) => {
-      if (!text || !text.trim()) {
-        resolve();
-        return;
-      }
-
+      if (!text || !text.trim()) { resolve(); return; }
       const currentSettings = settingsRef.current;
       const langCode = lang.split("-")[0].toLowerCase();
       const targetVoice = langCode === "de" ? currentSettings.voice_de : currentSettings.voice_vi;
@@ -161,7 +154,6 @@ export default function App() {
 
       const estimatedSeconds = Math.max(2.5, (text.length / 8) * (1 / Math.max(0.4, effectiveRate)));
       const maxTimeoutMs = Math.min(35000, Math.round(estimatedSeconds * 1000) + 3000);
-
       let resolved = false;
       let safetyTimer: any = null;
 
@@ -173,59 +165,16 @@ export default function App() {
         }
       };
 
-      // Safety timeout: Tránh bị kẹt app nếu mất kết nối
-      safetyTimer = setTimeout(() => {
-        console.warn(`[speakText] Safety timeout auto-resolved after ${maxTimeoutMs}ms for text: "${text.substring(0, 30)}..."`);
-        safeResolve();
-      }, maxTimeoutMs);
+      safetyTimer = setTimeout(() => safeResolve(), maxTimeoutMs);
 
-      // Cập nhật thông tin lên Màn hình khóa / Trình thả thông báo của Điện thoại
-      if ("mediaSession" in navigator && wordInfo) {
-        try {
-          navigator.mediaSession.metadata = new MediaMetadata({
-            title: `${wordInfo.article ? wordInfo.article + " " : ""}${wordInfo.word} — ${wordInfo.meaning}`,
-            artist: "DeutschFlow • Luyện Nghe Tiếng Đức Auto",
-            album: `Trình độ ${wordInfo.level || "A1"} • ${wordInfo.category || "General"}`,
-            artwork: [
-              { src: "https://images.unsplash.com/photo-1527866512907-a35a62a0f6c5?w=500&auto=format&fit=crop&q=80", sizes: "500x500", type: "image/jpeg" }
-            ]
-          });
-
-          navigator.mediaSession.setActionHandler("play", () => {
-            setIsPlaying(true);
-            setIsPaused(false);
-          });
-          navigator.mediaSession.setActionHandler("pause", () => {
-            setIsPaused(true);
-            if (currentAudioRef.current) currentAudioRef.current.pause();
-            if ("speechSynthesis" in window) window.speechSynthesis.cancel();
-          });
-          navigator.mediaSession.setActionHandler("nexttrack", () => {
-            playSequence();
-          });
-        } catch (e) {
-          console.debug("MediaSession setup error:", e);
-        }
-      }
-
-      // Ưu tiên đọc từ API Backend (Cloud TTS) để có giọng chuẩn và hay nhất
-      const preferCloud = currentSettings.prefer_cloud_tts !== false;
-
-      if (!preferCloud && "speechSynthesis" in window && !document.hidden) {
+      if ("speechSynthesis" in window && !document.hidden) {
         const voices = window.speechSynthesis.getVoices();
-
         const match = voices.find((v) => {
           const vName = v.name.toLowerCase();
           const vLang = v.lang.toLowerCase();
-          if (targetVoice && (vName.includes(targetVoice.toLowerCase()) || targetVoice.toLowerCase().includes(vName))) {
-            return true;
-          }
-          if (langCode === "vi") {
-            return vLang.startsWith("vi") || vName.includes("viet");
-          }
-          if (langCode === "de") {
-            return vLang.startsWith("de") || vName.includes("german") || vName.includes("deutsch");
-          }
+          if (targetVoice && (vName.includes(targetVoice.toLowerCase()) || targetVoice.toLowerCase().includes(vName))) return true;
+          if (langCode === "vi") return vLang.startsWith("vi") || vName.includes("viet");
+          if (langCode === "de") return vLang.startsWith("de") || vName.includes("german") || vName.includes("deutsch");
           return vLang.startsWith(langCode);
         });
 
@@ -236,15 +185,8 @@ export default function App() {
           utterance.lang = match.lang || lang;
           utterance.volume = currentSettings.volume / 100;
           utterance.rate = effectiveRate;
-
-          utterance.onend = () => {
-            safeResolve();
-          };
-          utterance.onerror = (e) => {
-            console.warn("SpeechSynthesis utterance error, falling back to server TTS:", e);
-            playServerTTS(text, lang, targetVoice, safeResolve, effectiveRate);
-          };
-
+          utterance.onend = () => safeResolve();
+          utterance.onerror = () => playServerTTS(text, lang, targetVoice, safeResolve, effectiveRate);
           window.speechSynthesis.speak(utterance);
           return;
         }
@@ -254,58 +196,30 @@ export default function App() {
     });
   };
 
-  const playServerTTS = (
-    text: string,
-    lang: string,
-    voice: string,
-    onComplete: () => void,
-    rate?: number
-  ) => {
+  const playServerTTS = (text: string, lang: string, voice: string, onComplete: () => void, rate?: number) => {
     try {
       if (currentAudioRef.current) {
         currentAudioRef.current.pause();
-        currentAudioRef.current.onended = null;
-        currentAudioRef.current.onerror = null;
       }
-
       const audioUrl = `/api/tts?text=${encodeURIComponent(text)}&lang=${encodeURIComponent(lang)}&voice=${encodeURIComponent(voice || "")}`;
       const audio = new Audio(audioUrl);
       currentAudioRef.current = audio;
-
       audio.volume = settingsRef.current.volume / 100;
       const effectiveRate = rate !== undefined ? rate : (settingsRef.current.speech_rate || 0.75);
-      
-      // Giữ nguyên độ cao (pitch) của giọng kể cả khi đọc chậm, chống hiện tượng giọng rè, robot
-      audio.preservesPitch = true;
-      if ("webkitPreservesPitch" in audio) {
-        (audio as any).webkitPreservesPitch = true;
-      }
-      if ("mozPreservesPitch" in audio) {
-        (audio as any).mozPreservesPitch = true;
-      }
-
       audio.defaultPlaybackRate = effectiveRate;
       audio.playbackRate = effectiveRate;
 
       let completed = false;
       const finish = () => {
-        if (!completed) {
-          completed = true;
-          onComplete();
-        }
+        if (!completed) { completed = true; onComplete(); }
       };
-
       audio.onended = finish;
       audio.onerror = finish;
-      audio.play().catch((err) => {
-        console.warn("Server TTS play error:", err);
-        finish();
-      });
+      audio.play().catch(() => finish());
     } catch {
       onComplete();
     }
   };
-  // ==========================================
 
   // Local Smart Random Selection
   const getSmartRandomWord = (): VocabularyItem | null => {
@@ -346,7 +260,7 @@ export default function App() {
       const vietnameseText = word.meaning;
       const POST_SPEECH_GAP_MS = 600;
 
-      if (currentSettings.playback_mode === "Vietnamese → German") {
+      if (currentSettings.playback_mode === "Vietnamese   German") {
         setStatusText(`ĐANG ĐỌC TIẾNG VIỆT: '${vietnameseText}'`);
         setStatusColor("text-sky-400");
         await speakText(vietnameseText, "vi-VN", word);
@@ -374,7 +288,7 @@ export default function App() {
           await new Promise((r) => setTimeout(r, currentSettings.delay_before_translation * 1000));
         }
 
-        if (currentSettings.playback_mode === "German → Example → Vietnamese" && word.example_de) {
+        if (currentSettings.playback_mode === "German   Example   Vietnamese" && word.example_de) {
           setStatusText(`ĐỌC VÍ DỤ: '${word.example_de}'`);
           setStatusColor("text-sky-400");
           await speakText(word.example_de, "de-DE", word);

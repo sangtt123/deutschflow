@@ -51,8 +51,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   volume: 80,
   speech_rate: 0.75,
   random_mode: true,
-  playback_mode: "German → Vietnamese",
-  prefer_cloud_tts: true
+  playback_mode: "German → Vietnamese"
 };
 
 const rawSeedList = getExpandedVocabularies();

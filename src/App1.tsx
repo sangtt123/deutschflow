@@ -7,117 +7,23 @@ import { WritingTestTab } from "./components/WritingTestTab";
 import { SettingsTab } from "./components/SettingsTab";
 import { StatisticsTab } from "./components/StatisticsTab";
 import { VocabularyItem, AppSettings } from "./types";
-import { getExpandedVocabularies } from "../server/vocabularies";
-
-const DEFAULT_SETTINGS: AppSettings = {
-  interval_minutes: 3,
-  delay_before_translation: 3,
-  voice_de: "de-DE-KillianNeural",
-  voice_vi: "vi-VN-HoaiMyNeural",
-  volume: 80,
-  speech_rate: 0.75,
-  random_mode: true,
-  playback_mode: "German → Vietnamese",
-  prefer_cloud_tts: true // Đảm bảo ưu tiên giọng chuẩn từ Server
-};
-
-// Hàm gán tên Chủ đề cố định vĩnh viễn dựa trên ID từ vựng (tối đa 20 từ / chủ đề)
-const applyFixedCategories = (items: VocabularyItem[], chunkSize = 20): VocabularyItem[] => {
-  if (!items || items.length === 0) return [];
-
-  // 1. Sắp xếp theo ID tăng dần để thứ tự phân chia LUÔN CỐ ĐỊNH 100%
-  const sortedItems = [...items].sort((a, b) => a.id - b.id);
-
-  // 2. Gom nhóm theo tên Chủ đề gốc (loại bỏ đuôi "- Chủ đề X" nếu có)
-  const grouped: Record<string, VocabularyItem[]> = {};
-
-  sortedItems.forEach((item) => {
-    const baseCategory = (item.category || "General")
-      .replace(/\s*-\s*Chủ đề\s*\d+/gi, "")
-      .trim();
-
-    if (!grouped[baseCategory]) {
-      grouped[baseCategory] = [];
-    }
-    grouped[baseCategory].push({ ...item, category: baseCategory });
-  });
-
-  // 3. Phân chia tối đa 20 từ / chủ đề nhỏ
-  const fixedResult: VocabularyItem[] = [];
-
-  Object.entries(grouped).forEach(([baseCat, catItems]) => {
-    if (catItems.length <= chunkSize) {
-      fixedResult.push(...catItems);
-    } else {
-      for (let i = 0; i < catItems.length; i += chunkSize) {
-        const partIndex = Math.floor(i / chunkSize) + 1;
-        const chunk = catItems.slice(i, i + chunkSize);
-        const fixedCategoryName = `${baseCat} - Chủ đề ${partIndex}`;
-
-        chunk.forEach((item) => {
-          fixedResult.push({ ...item, category: fixedCategoryName });
-        });
-      }
-    }
-  });
-
-  return fixedResult;
-};
 
 export default function App() {
   const [activeTab, setActiveTab] = useState("home");
-  
-  // Load và chuẩn hóa cố định danh sách từ vựng từ LocalStorage hoặc Seed list
-  const [vocabularies, setVocabularies] = useState<VocabularyItem[]>(() => {
-    const saved = localStorage.getItem("df_vocabularies");
-    let initialList: VocabularyItem[] = [];
-
-    if (saved) {
-      try { 
-        initialList = JSON.parse(saved); 
-      } catch (e) {}
-    }
-
-    if (initialList.length === 0) {
-      const rawSeedList = getExpandedVocabularies();
-      initialList = rawSeedList.map((item, index) => ({
-        id: index + 1,
-        word: item.word,
-        article: item.article,
-        meaning: item.meaning,
-        example_de: item.example_de,
-        example_vi: item.example_vi,
-        level: item.level,
-        category: item.category,
-        favorite: index % 5 === 0,
-        review_count: 0,
-        created_at: new Date().toISOString().split("T")[0]
-      }));
-    }
-
-    return applyFixedCategories(initialList, 20);
-  });
-
-  // Load Settings từ LocalStorage
-  const [settings, setSettings] = useState<AppSettings>(() => {
-    const saved = localStorage.getItem("df_settings");
-    if (saved) {
-      try { return JSON.parse(saved); } catch (e) {}
-    }
-    return DEFAULT_SETTINGS;
+  const [vocabularies, setVocabularies] = useState<VocabularyItem[]>([]);
+  const [settings, setSettings] = useState<AppSettings>({
+    interval_minutes: 3,
+    delay_before_translation: 3,
+    voice_de: "de-DE-KillianNeural",
+    voice_vi: "vi-VN-HoaiMyNeural",
+    volume: 80,
+    speech_rate: 0.75,
+    random_mode: true,
+    playback_mode: "German → Vietnamese"
   });
 
   const [selectedLevel, setSelectedLevel] = useState("Tất cả");
   const [selectedCategory, setSelectedCategory] = useState("Tất cả");
-
-  // Tự động lưu những thay đổi vào LocalStorage
-  useEffect(() => {
-    localStorage.setItem("df_vocabularies", JSON.stringify(vocabularies));
-  }, [vocabularies]);
-
-  useEffect(() => {
-    localStorage.setItem("df_settings", JSON.stringify(settings));
-  }, [settings]);
 
   // Playback Control State
   const [isPlaying, setIsPlaying] = useState(false);
@@ -129,19 +35,44 @@ export default function App() {
 
   const timerRef = useRef<any>(null);
   const countdownRef = useRef<any>(null);
-  const recentIdsRef = useRef<number[]>([]);
-  const settingsRef = useRef<AppSettings>(settings);
 
+  // Keep settingsRef updated with latest settings state
+  const settingsRef = useRef<AppSettings>(settings);
   useEffect(() => {
     settingsRef.current = settings;
   }, [settings]);
 
+  // Load initial vocabulary and settings from server
+  const loadVocabularies = () => {
+    fetch("/api/vocabulary")
+      .then((res) => res.json())
+      .then((data) => setVocabularies(data))
+      .catch((err) => console.error("Error loading vocabs:", err));
+  };
+
+  const loadSettings = () => {
+    fetch("/api/settings")
+      .then((res) => res.json())
+      .then((data) => setSettings(data))
+      .catch((err) => console.error("Error loading settings:", err));
+  };
+
+  useEffect(() => {
+    loadVocabularies();
+    loadSettings();
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === "home") {
+      loadSettings();
+    }
+  }, [activeTab]);
+
+  // Audio & Execution Refs
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
   const isSequenceRunningRef = useRef<boolean>(false);
 
-  // ==========================================
-  // LOGIC ÂM THANH XỊN ĐÃ MERGE TỪ App1.tsx
-  // ==========================================
+  // Multi-Engine TTS Audio Player (Web Speech API + High Quality Cloud TTS Proxy)
   const speakText = (
     text: string,
     lang: string,
@@ -155,10 +86,12 @@ export default function App() {
       }
 
       const currentSettings = settingsRef.current;
-      const langCode = lang.split("-")[0].toLowerCase();
+      const langCode = lang.split("-")[0].toLowerCase(); // 'vi' or 'de'
       const targetVoice = langCode === "de" ? currentSettings.voice_de : currentSettings.voice_vi;
       const effectiveRate = customRate !== undefined ? customRate : (currentSettings.speech_rate || 0.75);
 
+      // Dynamically calculate estimated speech duration based on text length and speed
+      // Average speech rate is ~10-12 characters per second at 1.0x. Slower at 0.75x.
       const estimatedSeconds = Math.max(2.5, (text.length / 8) * (1 / Math.max(0.4, effectiveRate)));
       const maxTimeoutMs = Math.min(35000, Math.round(estimatedSeconds * 1000) + 3000);
 
@@ -173,13 +106,13 @@ export default function App() {
         }
       };
 
-      // Safety timeout: Tránh bị kẹt app nếu mất kết nối
+      // Safety timeout: If browser speech API stalls, auto-resolve so app loop never freezes
       safetyTimer = setTimeout(() => {
         console.warn(`[speakText] Safety timeout auto-resolved after ${maxTimeoutMs}ms for text: "${text.substring(0, 30)}..."`);
         safeResolve();
       }, maxTimeoutMs);
 
-      // Cập nhật thông tin lên Màn hình khóa / Trình thả thông báo của Điện thoại
+      // Update MediaSession API for mobile lockscreen & Notification Center
       if ("mediaSession" in navigator && wordInfo) {
         try {
           navigator.mediaSession.metadata = new MediaMetadata({
@@ -208,7 +141,9 @@ export default function App() {
         }
       }
 
-      // Ưu tiên đọc từ API Backend (Cloud TTS) để có giọng chuẩn và hay nhất
+      // By default (prefer_cloud_tts !== false), use Cloud Studio HD Audio TTS directly.
+      // This guarantees crystal-clear, authentic native German & Vietnamese speech on both PC & Mobile,
+      // avoiding robotic local system voices on desktop Windows/Linux/Mac.
       const preferCloud = currentSettings.prefer_cloud_tts !== false;
 
       if (!preferCloud && "speechSynthesis" in window && !document.hidden) {
@@ -250,6 +185,7 @@ export default function App() {
         }
       }
 
+      // Default HD Audio Stream (HTML5 Audio plays continuously with studio-grade native voice)
       playServerTTS(text, lang, targetVoice, safeResolve, effectiveRate);
     });
   };
@@ -262,6 +198,7 @@ export default function App() {
     rate?: number
   ) => {
     try {
+      // Safely stop any active previous audio element before playing new phrase
       if (currentAudioRef.current) {
         currentAudioRef.current.pause();
         currentAudioRef.current.onended = null;
@@ -275,7 +212,7 @@ export default function App() {
       audio.volume = settingsRef.current.volume / 100;
       const effectiveRate = rate !== undefined ? rate : (settingsRef.current.speech_rate || 0.75);
       
-      // Giữ nguyên độ cao (pitch) của giọng kể cả khi đọc chậm, chống hiện tượng giọng rè, robot
+      // Preserve pitch so slowing down playback (0.7x, 0.5x) doesn't distort pitch or sound metallic
       audio.preservesPitch = true;
       if ("webkitPreservesPitch" in audio) {
         (audio as any).webkitPreservesPitch = true;
@@ -305,91 +242,99 @@ export default function App() {
       onComplete();
     }
   };
-  // ==========================================
-
-  // Local Smart Random Selection
-  const getSmartRandomWord = (): VocabularyItem | null => {
-    let list = vocabularies;
-    if (selectedLevel && selectedLevel !== "Tất cả") list = list.filter(v => v.level === selectedLevel);
-    if (selectedCategory && selectedCategory !== "Tất cả") list = list.filter(v => v.category === selectedCategory);
-    if (list.length === 0) return null;
-
-    let available = list.filter(v => !recentIdsRef.current.includes(v.id));
-    if (available.length === 0) {
-      recentIdsRef.current = [];
-      available = list;
-    }
-    const selected = available[Math.floor(Math.random() * available.length)];
-    recentIdsRef.current.push(selected.id);
-    if (recentIdsRef.current.length > 10) recentIdsRef.current.shift();
-
-    // Tăng số lần review
-    setVocabularies(prev => prev.map(v => v.id === selected.id ? { ...v, review_count: (v.review_count || 0) + 1 } : v));
-    return selected;
-  };
 
   const playSequence = async () => {
-    if (isSequenceRunningRef.current) return;
+    // Lock guard: Prevent overlapping calls if previous sequence is still reading long sentences
+    if (isSequenceRunningRef.current) {
+      console.log("A playback sequence is already running. Skipping concurrent trigger.");
+      return;
+    }
     isSequenceRunningRef.current = true;
 
     try {
       const currentSettings = settingsRef.current;
-      const word = getSmartRandomWord();
-      if (!word) {
-        setStatusText("KHÔNG CÓ TỪ SẮP XẾP");
+      // 1. Get next smart random word from backend
+      const res = await fetch(`/api/vocabulary/smart-random?level=${encodeURIComponent(selectedLevel)}&category=${encodeURIComponent(selectedCategory)}`);
+      if (!res.ok) {
+        setStatusText("KHÔNG CÓ TỪ PHÙ HỢP BỘ LỌC");
         setStatusColor("text-rose-400");
         return;
       }
 
+      const word: VocabularyItem = await res.json();
       setCurrentWord(word);
+
       const germanText = `${word.article ? word.article + " " : ""}${word.word}`;
       const vietnameseText = word.meaning;
+
+      // Minimum buffer pause (ms) after speech finishes before taking next step
       const POST_SPEECH_GAP_MS = 600;
 
       if (currentSettings.playback_mode === "Vietnamese → German") {
-        setStatusText(`ĐANG ĐỌC TIẾNG VIỆT: '${vietnameseText}'`);
+        // Mode Vietnamese -> German
+        setStatusText(`🔊 ĐANG ĐỌC TIẾNG VIỆT: '${vietnameseText}'`);
         setStatusColor("text-sky-400");
         await speakText(vietnameseText, "vi-VN", word);
         await new Promise((r) => setTimeout(r, POST_SPEECH_GAP_MS));
 
         if (currentSettings.delay_before_translation > 0) {
-          setStatusText(`CHỜ SANG TIẾNG ĐỨC (${currentSettings.delay_before_translation}s)...`);
+          setStatusText(`⏳ CHỜ ĐOÁN TIẾNG ĐỨC (${currentSettings.delay_before_translation}s)...`);
           setStatusColor("text-amber-400");
           await new Promise((r) => setTimeout(r, currentSettings.delay_before_translation * 1000));
         }
 
-        setStatusText(`ĐANG ĐỌC TIẾNG ĐỨC: '${germanText}'`);
+        setStatusText(`🔊 ĐANG ĐỌC TIẾNG ĐỨC: '${germanText}'`);
         setStatusColor("text-emerald-400");
         await speakText(germanText, "de-DE", word);
         await new Promise((r) => setTimeout(r, POST_SPEECH_GAP_MS));
       } else {
-        setStatusText(`ĐANG ĐỌC TIẾNG ĐỨC: '${germanText}'`);
+        // Standard Modes (German -> ...)
+        // Read German Word
+        setStatusText(`🔊 ĐANG ĐỌC TIẾNG ĐỨC: '${germanText}'`);
         setStatusColor("text-emerald-400");
         await speakText(germanText, "de-DE", word);
         await new Promise((r) => setTimeout(r, POST_SPEECH_GAP_MS));
 
+        // Wait Delay before translation
         if (currentSettings.delay_before_translation > 0) {
-          setStatusText(`CHỜ (${currentSettings.delay_before_translation}s)...`);
+          setStatusText(`⏳ CHỜ ĐOÁN BẢN DỊCH (${currentSettings.delay_before_translation}s)...`);
           setStatusColor("text-amber-400");
           await new Promise((r) => setTimeout(r, currentSettings.delay_before_translation * 1000));
         }
 
+        // Read Example if Mode 3
         if (currentSettings.playback_mode === "German → Example → Vietnamese" && word.example_de) {
-          setStatusText(`ĐỌC VÍ DỤ: '${word.example_de}'`);
+          setStatusText(`🔊 ĐỌC VÍ DỤ TIẾNG ĐỨC: '${word.example_de}'`);
           setStatusColor("text-sky-400");
           await speakText(word.example_de, "de-DE", word);
           await new Promise((r) => setTimeout(r, POST_SPEECH_GAP_MS));
         }
 
-        setStatusText(`ĐANG ĐỌC TIẾNG VIỆT: '${vietnameseText}'`);
+        // Read Vietnamese Translation
+        setStatusText(`🔊 ĐANG ĐỌC TIẾNG VIỆT: '${vietnameseText}'`);
         setStatusColor("text-sky-400");
         await speakText(vietnameseText, "vi-VN", word);
         await new Promise((r) => setTimeout(r, POST_SPEECH_GAP_MS));
+
+        // Repeat German if Mode 2 (Guess mode)
+        if (currentSettings.playback_mode === "German → Guess → Vietnamese → German") {
+          if (currentSettings.delay_before_translation > 0) {
+            await new Promise((r) => setTimeout(r, currentSettings.delay_before_translation * 1000));
+          }
+          setStatusText(`🔊 NHẮC LẠI TIẾNG ĐỨC: '${germanText}'`);
+          setStatusColor("text-emerald-400");
+          await speakText(germanText, "de-DE", word);
+          await new Promise((r) => setTimeout(r, POST_SPEECH_GAP_MS));
+        }
       }
 
-      setStatusText("HOÀN THÀNH. CHỜ CHU KỲ TIẾP THEO...");
+      // Complete cycle and set countdown to next cycle
+      setStatusText("⏳ ĐÃ HOÀN THÀNH. CHỜ CHU KỲ TIẾP THEO...");
       setStatusColor("text-indigo-400");
-      setCountdown(Math.round(currentSettings.interval_minutes * 60));
+
+      const intervalSec = Math.round(currentSettings.interval_minutes * 60);
+      setCountdown(intervalSec);
+
     } catch (e) {
       console.error("Error during playback sequence:", e);
     } finally {
@@ -397,7 +342,18 @@ export default function App() {
     }
   };
 
-  const handleStart = () => {
+  // Start Interval Scheduler
+  const handleStart = async () => {
+    try {
+      const res = await fetch("/api/settings");
+      if (res.ok) {
+        const latest = await res.json();
+        setSettings(latest);
+        settingsRef.current = latest;
+      }
+    } catch (e) {
+      console.error("Error refreshing settings on start:", e);
+    }
     setIsPlaying(true);
     setIsPaused(false);
     playSequence();
@@ -406,14 +362,14 @@ export default function App() {
   const handlePause = () => {
     if (isPaused) {
       setIsPaused(false);
-      setStatusText("ĐANG CHẠY");
+      setStatusText("ĐÃ TIẾP TỤC BẮT ĐẦU");
       setStatusColor("text-emerald-400");
     } else {
       setIsPaused(true);
       isSequenceRunningRef.current = false;
       if (currentAudioRef.current) currentAudioRef.current.pause();
       if ("speechSynthesis" in window) window.speechSynthesis.cancel();
-      setStatusText("TẠM DỪNG");
+      setStatusText("ĐÃ TẠM DỪNG (PAUSED)");
       setStatusColor("text-amber-400");
     }
   };
@@ -426,15 +382,19 @@ export default function App() {
     if ("speechSynthesis" in window) window.speechSynthesis.cancel();
     clearInterval(timerRef.current);
     clearInterval(countdownRef.current);
-    setStatusText("ĐÃ DỪNG");
+    setStatusText("ĐÃ DỪNG HOÀN TOÀN");
     setStatusColor("text-rose-400");
   };
 
+  // Timer loop for interval triggers
   useEffect(() => {
     if (isPlaying && !isPaused) {
       const intervalMs = Math.max(5000, settings.interval_minutes * 60 * 1000);
       timerRef.current = setInterval(() => {
-        if (!isSequenceRunningRef.current) playSequence();
+        // Only trigger sequence if previous sequence isn't currently running
+        if (!isSequenceRunningRef.current) {
+          playSequence();
+        }
       }, intervalMs);
 
       countdownRef.current = setInterval(() => {
@@ -444,91 +404,99 @@ export default function App() {
       clearInterval(timerRef.current);
       clearInterval(countdownRef.current);
     }
+
     return () => {
       clearInterval(timerRef.current);
       clearInterval(countdownRef.current);
     };
   }, [isPlaying, isPaused, settings, selectedLevel, selectedCategory]);
 
-  // Local CRUD Handlers
-  const handleAddVocab = (vocab: Partial<VocabularyItem>) => {
-    const newItem: VocabularyItem = {
-      id: Date.now(),
-      word: vocab.word || "",
-      article: vocab.article || "",
-      meaning: vocab.meaning || "",
-      example_de: vocab.example_de || "",
-      example_vi: vocab.example_vi || "",
-      level: vocab.level || "A1",
-      category: vocab.category || "General",
-      favorite: !!vocab.favorite,
-      review_count: 0,
-      created_at: new Date().toISOString().split("T")[0]
-    };
-    setVocabularies(prev => applyFixedCategories([...prev, newItem], 20));
+  // Save Settings
+  const handleSaveSettings = async () => {
+    try {
+      await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(settings)
+      });
+      alert("Đã lưu cài đặt hệ thống thành công!");
+    } catch (err) {
+      console.error("Error saving settings:", err);
+    }
   };
 
-  const handleEditVocab = (id: number, vocab: Partial<VocabularyItem>) => {
-    setVocabularies(prev => {
-      const updated = prev.map(v => v.id === id ? { ...v, ...vocab } : v);
-      return applyFixedCategories(updated, 20);
+  // Vocab CRUD Handlers
+  const handleAddVocab = async (vocab: Partial<VocabularyItem>) => {
+    const res = await fetch("/api/vocabulary", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(vocab)
     });
+    if (res.ok) loadVocabularies();
   };
 
-  const handleDeleteVocab = (id: number) => {
-    setVocabularies(prev => applyFixedCategories(prev.filter(v => v.id !== id), 20));
+  const handleEditVocab = async (id: number, vocab: Partial<VocabularyItem>) => {
+    const res = await fetch(`/api/vocabulary/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(vocab)
+    });
+    if (res.ok) loadVocabularies();
   };
 
-  const handleDeleteBatchVocab = (ids: number[]) => {
-    const idSet = new Set(ids);
-    setVocabularies(prev => applyFixedCategories(prev.filter(v => !idSet.has(v.id)), 20));
-  };
-
-  const handleToggleFavorite = (id: number) => {
-    setVocabularies(prev => prev.map(v => v.id === id ? { ...v, favorite: !v.favorite } : v));
-  };
-
-  const handleResetSeed = () => {
-    const rawSeedList = getExpandedVocabularies();
-    const existingKeys = new Set(vocabularies.map(v => `${(v.article || "").toLowerCase().trim()} ${(v.word || "").toLowerCase().trim()}`));
-    let maxId = vocabularies.reduce((max, v) => Math.max(max, v.id || 0), 0);
-    const newItems: VocabularyItem[] = [];
-
-    rawSeedList.forEach(seed => {
-      const key = `${(seed.article || "").toLowerCase().trim()} ${(seed.word || "").toLowerCase().trim()}`;
-      if (!existingKeys.has(key)) {
-        maxId++;
-        newItems.push({ ...seed, id: maxId, favorite: false, review_count: 0, created_at: new Date().toISOString().split("T")[0] });
+  const handleDeleteVocab = async (id: number) => {
+    // Optimistic state update for instant UI feedback without blocking browser confirm alerts
+    setVocabularies((prev) => prev.filter((v) => v.id !== id));
+    try {
+      const res = await fetch(`/api/vocabulary/${id}`, { method: "DELETE" });
+      if (!res.ok) {
+        loadVocabularies();
       }
-    });
-
-    setVocabularies(prev => applyFixedCategories([...prev, ...newItems], 20));
+    } catch (e) {
+      console.error("Error deleting vocabulary:", e);
+      loadVocabularies();
+    }
   };
 
-  const handleImportVocab = (items: Partial<VocabularyItem>[], mode: "append" | "replace") => {
-    let maxId = mode === "replace" ? 0 : vocabularies.reduce((max, v) => Math.max(max, v.id || 0), 0);
-    const nowStr = new Date().toISOString().split("T")[0];
-    const formatted: VocabularyItem[] = items.map(item => {
-      maxId++;
-      return {
-        id: maxId,
-        word: String(item.word || "").trim(),
-        article: String(item.article || "").trim(),
-        meaning: String(item.meaning || "").trim(),
-        example_de: String(item.example_de || "").trim(),
-        example_vi: String(item.example_vi || "").trim(),
-        level: String(item.level || "A1").trim(),
-        category: String(item.category || "General").trim(),
-        favorite: false,
-        review_count: 0,
-        created_at: nowStr
-      };
-    });
+  const handleDeleteBatchVocab = async (ids: number[]) => {
+    if (!ids || ids.length === 0) return;
+    const idSet = new Set(ids);
+    setVocabularies((prev) => prev.filter((v) => !idSet.has(v.id)));
+    try {
+      const res = await fetch("/api/vocabulary/delete-batch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids })
+      });
+      if (!res.ok) {
+        loadVocabularies();
+      }
+    } catch (e) {
+      console.error("Error deleting batch vocabulary:", e);
+      loadVocabularies();
+    }
+  };
 
-    setVocabularies(prev => {
-      const combined = mode === "replace" ? formatted : [...prev, ...formatted];
-      return applyFixedCategories(combined, 20);
-    });
+  const handleToggleFavorite = async (id: number) => {
+    const res = await fetch(`/api/vocabulary/${id}/favorite`, { method: "POST" });
+    if (res.ok) loadVocabularies();
+  };
+
+  const handleResetSeed = async () => {
+    try {
+      const res = await fetch("/api/vocabulary/reset-seed", { method: "POST" });
+      if (res.ok) {
+        loadVocabularies();
+      }
+    } catch (e) {
+      console.error("Error resetting seed:", e);
+    }
+  };
+
+  const handleTestVoice = async () => {
+    await speakText("Guten Tag! Willkommen bei DeutschFlow.", "de-DE");
+    await new Promise((r) => setTimeout(r, 800));
+    await speakText("Xin chào! Giọng đọc tiếng Việt tự nhiên đã được kích hoạt.", "vi-VN");
   };
 
   return (
@@ -539,6 +507,7 @@ export default function App() {
         isPlaying={isPlaying && !isPaused}
         activeWord={currentWord?.word}
       />
+
       <main className="flex-1 overflow-y-auto min-w-0">
         {activeTab === "home" && (
           <HomeTab
@@ -555,6 +524,7 @@ export default function App() {
             onSpeak={(text, lang, wordInfo, rate) => speakText(text, lang, wordInfo, rate)}
           />
         )}
+
         {activeTab === "playlist" && (
           <PlaylistTab
             settings={settings}
@@ -563,10 +533,11 @@ export default function App() {
             setSelectedLevel={setSelectedLevel}
             selectedCategory={selectedCategory}
             setSelectedCategory={setSelectedCategory}
-            onSave={() => alert("Đã lưu cấu hình Playlist!")}
+            onSave={handleSaveSettings}
             vocabularies={vocabularies}
           />
         )}
+
         {activeTab === "vocabulary" && (
           <VocabularyTab
             vocabularies={vocabularies}
@@ -576,25 +547,28 @@ export default function App() {
             onDeleteBatch={handleDeleteBatchVocab}
             onToggleFavorite={handleToggleFavorite}
             onResetSeed={handleResetSeed}
-            onImport={handleImportVocab}
+            onReload={loadVocabularies}
             onSpeak={(text, lang, wordInfo, rate) => speakText(text, lang, wordInfo, rate)}
           />
         )}
+
         {activeTab === "writing" && (
           <WritingTestTab
             vocabularies={vocabularies}
             onSpeak={(text, lang, wordInfo, rate) => speakText(text, lang, wordInfo, rate)}
           />
         )}
+
         {activeTab === "settings" && (
           <SettingsTab
             settings={settings}
             setSettings={setSettings}
-            onSave={() => alert("Đã lưu cài đặt!")}
-            onTestVoice={() => speakText("Guten Tag! Willkommen bei DeutschFlow.", "de-DE")}
+            onSave={handleSaveSettings}
+            onTestVoice={handleTestVoice}
           />
         )}
-        {activeTab === "statistics" && <StatisticsTab vocabularies={vocabularies} />}
+
+        {activeTab === "statistics" && <StatisticsTab />}
       </main>
     </div>
   );
