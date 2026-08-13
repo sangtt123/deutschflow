@@ -1,6 +1,4 @@
-import type { VercelRequest, VercelResponse } from '@vercel/node';
-
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+export default async function handler(req: any, res: any) {
   const { text, lang } = req.query;
   if (!text || typeof text !== "string") {
     return res.status(400).send("Text parameter is required");

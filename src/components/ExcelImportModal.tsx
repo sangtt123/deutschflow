@@ -13,7 +13,8 @@ interface ExcelImportModalProps {
 export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
   isOpen,
   onClose,
-  onImportSuccess
+  onImportSuccess,
+  onImport
 }) => {
   const [file, setFile] = useState<File | null>(null);
   const [parsedData, setParsedData] = useState<Partial<VocabularyItem>[]>([]);
