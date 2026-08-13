@@ -2,7 +2,7 @@ const fs = require('fs');
 const XLSX = require('xlsx');
 
 // Tên file Excel của bạn ở thư mục gốc
-const excelFileName = 'DeutschFlow_TuVung_2000_A1-B1_Sach_Nghia_Viet_RaSoat.xlsx';
+const excelFileName = 'DeutschFlow_TuVung_2000_A1-B1_Sach_Nghia_Viet_RaSoat_Updated.xlsx';
 
 if (!fs.existsSync(excelFileName)) {
   console.error(`❌ Không tìm thấy file ${excelFileName} ở thư mục gốc!`);
